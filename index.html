@@ -1,66 +1,61 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-
   <head>
-    <meta charset="UTF-8">
+    <meta charset="UTF-8" />
     <title>threejs-bayesian-generation</title>
-
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Three.js Generative Shader</title>
-<link rel="stylesheet" href="./style.css">
-
+    <link rel="stylesheet" href="./style.css" />
   </head>
 
   <body>
-  <body>
     <!-- The canvas element where the shader will be rendered -->
     <canvas id="shader-canvas"></canvas>
-
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://unpkg.com/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
     <script id="vertexShader-passthrough" type="x-shader/x-vertex">
-        // 'varying' means it passes data to the fragment shader
-        varying vec2 vUv;
-        uniform sampler2D u_texture; // <-- 1. Declare the new uniform
+      // 'varying' means it passes data to the fragment shader
+      varying vec2 vUv;
+      uniform sampler2D u_texture; // <-- 1. Declare the new uniform
 
-        void main() {
-            // 'uv' is an attribute provided by PlaneGeometry
-            vUv = uv;
+      void main() {
+          // 'uv' is an attribute provided by PlaneGeometry
+          vUv = uv;
 
-            // 'position' is an attribute.
-            // 'projectionMatrix' and 'modelViewMatrix' are uniforms
-            // automatically provided by three.js to position the vertex.
-            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-        }
+          // 'position' is an attribute.
+          // 'projectionMatrix' and 'modelViewMatrix' are uniforms
+          // automatically provided by three.js to position the vertex.
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
     </script>
-      <script id="vertexShader" type="x-shader/x-vertex">
-        precision mediump float;
-        // 'varying' means it passes data to the fragment shader
-        varying vec2 vUv;
-        uniform sampler2D u_texture; // <-- 1. Declare the new uniform
-        uniform float u_time;
+    <script id="vertexShader" type="x-shader/x-vertex">
+      precision mediump float;
+      // 'varying' means it passes data to the fragment shader
+      varying vec2 vUv;
+      uniform sampler2D u_texture; // <-- 1. Declare the new uniform
+      uniform float u_time;
 
-        void main() {
-            // 'uv' is an attribute provided by PlaneGeometry
-            vUv = uv;
-            vec3 displacedPosition = position;
-            // 2. Calculate displacement.
-            // We use position.x and position.y to make the wave vary across
-            // the plane, otherwise the whole plane would just move up and down.
-            // Multiplying by 5.0 increases the frequency (more waves).
-            // Multiplying by 0.2 decreases the amplitude (smaller waves).
-            float displacement =
-                sin(position.x * 5.0 + u_time) * 0.2 +
-                sin(position.y * 5.0 + u_time) * 0.2;
+      void main() {
+          // 'uv' is an attribute provided by PlaneGeometry
+          vUv = uv;
+          vec3 displacedPosition = position;
+          // 2. Calculate displacement.
+          // We use position.x and position.y to make the wave vary across
+          // the plane, otherwise the whole plane would just move up and down.
+          // Multiplying by 5.0 increases the frequency (more waves).
+          // Multiplying by 0.2 decreases the amplitude (smaller waves).
+          float displacement =
+              sin(position.x * 5.0 + u_time) * 0.2 +
+              sin(position.y * 5.0 + u_time) * 0.2;
 
-            // 3. Apply the displacement to the z-axis
-            //displacedPosition.z = displacement; // This displacement will be invisible in orthogrpahic straight down view
-            // 3. Apply the displacement to the x-axis instead
-            displacedPosition.x = position.x + displacement;
+          // 3. Apply the displacement to the z-axis
+          //displacedPosition.z = displacement; // This displacement will be invisible in orthogrpahic straight down view
+          // 3. Apply the displacement to the x-axis instead
+          displacedPosition.x = position.x + displacement;
 
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(displacedPosition, 1.0);
-        }
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(displacedPosition, 1.0);
+      }
     </script>
 
     <!-- 3. The Fragment Shader (GLSL) -->
@@ -142,7 +137,6 @@
             // with texture:
             //vec3 finalColor = blendedColor * ditheredValue;
 
-            // to skip texture:
             float ditheredValue2 = bayesianDither(originalColor);
             vec3 finalColor = originalColor * ditheredValue2;
 
@@ -155,13 +149,12 @@
             }; //<= Monochrome no texture
             //gl_FragColor = vec4(vec3(ditheredValue), 1.0); //<= Monochrome w/ texture
         }
-
     </script>
 
     <!-- 4. The JavaScript to set up three.js -->
     <script>
-    // Get the canvas element
-      const canvas = document.getElementById('shader-canvas');
+      // Get the canvas element
+      const canvas = document.getElementById("shader-canvas");
 
       // Create the three.js scene
       const scene = new THREE.Scene();
@@ -185,9 +178,9 @@
       const renderer = new THREE.WebGLRenderer({ canvas: canvas });
 
       const uniforms = {
-          u_time: { value: 0.0 },
-          u_resolution: { value: new THREE.Vector2(1, 1) }, // Placeholder
-          u_texture: { value: null }
+        u_time: { value: 0.0 },
+        u_resolution: { value: new THREE.Vector2(1, 1) }, // Placeholder
+        u_texture: { value: null },
       };
 
       // Declare the chair variable
@@ -195,9 +188,9 @@
 
       // Create the material, using our custom shaders and uniforms
       const shader_material = new THREE.ShaderMaterial({
-        vertexShader: document.getElementById('vertexShader').textContent,
-        fragmentShader: document.getElementById('fragmentShader').textContent,
-        uniforms: uniforms
+        vertexShader: document.getElementById("vertexShader").textContent,
+        fragmentShader: document.getElementById("fragmentShader").textContent,
+        uniforms: uniforms,
       });
 
       // 1. Instantiate the loader
@@ -205,8 +198,8 @@
 
       // 2. Call the .load() method
       loader.load(
-        'Stol.glb',
-        function(gltf) {
+        "Stol.glb",
+        function (gltf) {
           // 3. (onLoad) Success callback
           console.log("Model loaded successfully!");
 
@@ -214,7 +207,7 @@
           chair_mesh = gltf.scene;
 
           // Apply the custom shader material to the loaded model
-          chair_mesh.traverse(function(child) {
+          chair_mesh.traverse(function (child) {
             if (child.isMesh) {
               child.material = shader_material;
             }
@@ -229,14 +222,14 @@
           // Add the loaded model to the scene
           scene.add(chair_mesh);
         },
-        function(xhr) {
+        function (xhr) {
           // 4. (onProgress) Optional progress callback
-          console.log((xhr.loaded / xhr.total * 100) + '% loaded');
+          console.log((xhr.loaded / xhr.total) * 100 + "% loaded");
         },
-        function(error) {
+        function (error) {
           // 5. (onError) Optional error callback
-          console.error('An error happened while loading the model:', error);
-        }
+          console.error("An error happened while loading the model:", error);
+        },
       );
 
       // Create the geometry: a simple plane that fills the screen
@@ -262,8 +255,8 @@
         // Update renderer resolution, but NOT the style
         renderer.setSize(width, height, false);
 
-        // Update shader resolution uniform
-        uniforms.u_resolution.value.set(width, height);
+        // Update shader resolution uniform -- Not sure this makes a difference, removing it for now
+        //uniforms.u_resolution.value.set(width, height);
 
         // Update camera bounds
         const aspect = width / height;
@@ -280,7 +273,7 @@
       }
 
       // 2. Add the listener
-      window.addEventListener('resize', handleResize);
+      window.addEventListener("resize", handleResize);
 
       // 3. Call it ONCE right now to set the correct initial size
       handleResize();
@@ -302,7 +295,6 @@
           // Set position directly
           chair_mesh.position.y = Math.sin(time) * 0.6;
         }
-
         // Render the scene
         renderer.render(scene, camera);
       }
@@ -310,9 +302,5 @@
       // Start the animation loop!
       animate();
     </script>
-</body>
-</html>
-
   </body>
-
 </html>
