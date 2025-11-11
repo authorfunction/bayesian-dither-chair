@@ -169,37 +169,25 @@
       // Create a clock to track elapsed time
       const clock = new THREE.Clock();
 
-      // *** MODIFIED ***
-      // Swapped back to OrthographicCamera as requested
-      const camera = new THREE.OrthographicCamera(
-        -1, // left
-        1, // right
-        1, // top
-        -1, // bottom
-        0.1, // near (changed from -1 for better depth)
-        1000 // far (changed from 1 for better depth)
-      );
+      // We'll use a vertical view size of 2 (from -1 to 1)
+      const frustumHeight = 2;
+      const aspect = canvas.clientWidth / canvas.clientHeight;
+      const frustumWidth = frustumHeight * aspect;
+
+      // Create camera with placeholder bounds, handleResize() will fix it
+      const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 1000);
 
       // *** NEW ***
       // Position the camera so it looks at the scene
       camera.position.z = 2;
 
       // Create the WebGL renderer
-      const renderer = new THREE.WebGLRenderer({
-        canvas: canvas
-      });
-      renderer.setSize(window.innerWidth, window.innerHeight);
+      const renderer = new THREE.WebGLRenderer({ canvas: canvas });
 
       const uniforms = {
-        u_time: {
-          value: 0.0
-        },
-        u_resolution: {
-          value: new THREE.Vector2(window.innerWidth, window.innerHeight)
-        },
-        u_texture: {
-          value: null
-        } // Start as null
+          u_time: { value: 0.0 },
+          u_resolution: { value: new THREE.Vector2(1, 1) }, // Placeholder
+          u_texture: { value: null }
       };
 
       // Declare the chair variable
@@ -234,7 +222,9 @@
 
           // *** MODIFIED ***
           // Scale the chair down to fit in the 2x2 orthographic view
-          chair_mesh.scale.set(0.5, 0.5, 0.5);
+          //chair_mesh.scale.set(0.5, 0.5, 0.5);
+          // Scale the chair to be much smaller
+          chair_mesh.scale.set(0.3, 0.3, 0.3);
 
           // Add the loaded model to the scene
           scene.add(chair_mesh);
@@ -251,7 +241,7 @@
 
       // Create the geometry: a simple plane that fills the screen
       // The 2, 2 dimensions match the orthographic camera's view
-      const plane_geometry = new THREE.PlaneGeometry(2, 2, 8, 8);
+      const plane_geometry = new THREE.PlaneGeometry(1, 2, 8, 8);
 
       // Create a mesh (the 3D object) from the geometry and material
       const mesh = new THREE.Mesh(plane_geometry, shader_material);
@@ -263,16 +253,37 @@
       // Add the mesh to the scene
       scene.add(mesh);
 
-      // *** MODIFIED ***
-      // Handle window resizing (removed camera updates, as they
-      // aren't needed for this type of orthographic camera)
-      window.addEventListener('resize', () => {
-        // Update renderer size
-        renderer.setSize(window.innerWidth, window.innerHeight);
+      // 1. Define ONE function to handle all sizing
+      function handleResize() {
+        // Get the new size from the CSS-controlled canvas
+        const width = canvas.clientWidth;
+        const height = canvas.clientHeight;
+
+        // Update renderer resolution, but NOT the style
+        renderer.setSize(width, height, false);
 
         // Update shader resolution uniform
-        uniforms.u_resolution.value.set(window.innerWidth, window.innerHeight);
-      });
+        uniforms.u_resolution.value.set(width, height);
+
+        // Update camera bounds
+        const aspect = width / height;
+        const frustumHeight = 2; // Keep vertical size consistent
+        const frustumWidth = frustumHeight * aspect;
+
+        camera.left = frustumWidth / -2;
+        camera.right = frustumWidth / 2;
+        camera.top = frustumHeight / 2;
+        camera.bottom = frustumHeight / -2;
+
+        // Tell the camera to apply the changes
+        camera.updateProjectionMatrix();
+      }
+
+      // 2. Add the listener
+      window.addEventListener('resize', handleResize);
+
+      // 3. Call it ONCE right now to set the correct initial size
+      handleResize();
 
       // Create the animation loop
       function animate() {
