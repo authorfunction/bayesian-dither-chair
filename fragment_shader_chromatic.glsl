@@ -3,6 +3,7 @@ precision mediump float;
 uniform vec2 u_resolution;
 uniform float u_time;
 uniform sampler2D u_texture;
+uniform float u_behaviour;
 
 varying vec2 vUv;
 
@@ -77,12 +78,25 @@ void main() {
     // This applies the dither mask to the chromatic colors
     vec3 finalRender = combinedColor * ditheredValue;
 
-    if ((sin(u_time / 1.17)) < 0.0) {
+    switch (int(u_behaviour)) {
+        case 0:
         // Show Colorized version (with aberration)
         gl_FragColor = vec4(finalRender, 1.0);
-    }
-    else {
+        break;
+        case 1:
         // Show Monochrome version
         gl_FragColor = vec4(vec3(ditheredValue), 1.0);
+        break;
+        default:
+        // Default behavior flip periodically
+        if ((sin(u_time / 1.17)) < 0.0) {
+            // Show Colorized version (with aberration)
+            gl_FragColor = vec4(finalRender, 1.0);
+        }
+        else {
+            // Show Monochrome version
+            gl_FragColor = vec4(vec3(ditheredValue), 1.0);
+            break;
+        }
     }
 }

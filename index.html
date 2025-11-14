@@ -21,10 +21,12 @@
 
     <script>
       async function main() {
-        let isGlitchActive = true; // The global boolean
+        //globals
+        let isGlitchActive = true;
+        let currentIndex = 0;
 
         try {
-          // --- Your original setup code ---
+          // --- setup code ---
           const canvas = document.getElementById("shader-canvas");
           const scene = new THREE.Scene();
           const clock = new THREE.Clock();
@@ -34,8 +36,6 @@
           const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 1000);
           camera.position.z = 2;
           const renderer = new THREE.WebGLRenderer({ canvas: canvas });
-
-          // 2. Setup
           const composer = new THREE.EffectComposer(renderer);
           const renderPass = new THREE.RenderPass(scene, camera);
           composer.addPass(renderPass);
@@ -45,11 +45,12 @@
             u_time: { value: 0.0 },
             u_resolution: { value: new THREE.Vector2(1, 1) },
             u_texture: { value: null },
+            u_behaviour: { value: 3.0 }, // 0.0, 1.0, or 3.0 sets the behaviour of the shader
           };
           let chair_mesh;
 
-          // 1. Asynchronously fetch shader files.
-          //    Promise.all waits for to finish.
+          // Asynchronously fetch shader files.
+          // Promise.all waits for to finish.
           console.log("Fetching shaders...");
           const [vertexResponse, fragmentResponse, postResponse] =
             await Promise.all([
@@ -72,13 +73,13 @@
               `Failed to fetch fragment_post_chromatic.glsl: ${fragmentPostResponse.statusText}`,
             );
 
-          // 2. Get the text content from the loaded files
+          // Get the text content from the loaded files
           const vertexShader = await vertexResponse.text();
           const fragmentShader = await fragmentResponse.text();
           const postFragmentShader = await postResponse.text();
           console.log("Shaders loaded successfully.");
 
-          // 2. DEFINE THE POST-PROCESSING SHADER OBJECT
+          // DEFINE THE POST-PROCESSING SHADER OBJECT
           // We need a simple vertex shader for the screen quad.
           // We can define it right here as a string because it never changes.
           const ChromaticAberrationShader = {
@@ -94,7 +95,7 @@
                       gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
                   }
               `,
-            // The fragment shader you loaded from the file
+            // The fragment shader  loaded from the file
             fragmentShader: postFragmentShader,
           };
 
@@ -105,7 +106,7 @@
           );
           composer.addPass(aberrationPass);
 
-          // 3. NOW create the material, since we have the shader text loaded
+          // NOW create the material, since we have the shader text loaded
           const shader_material = new THREE.ShaderMaterial({
             vertexShader: vertexShader, // <-- Use the loaded text
             fragmentShader: fragmentShader, // <-- Use the loaded text
@@ -122,7 +123,7 @@
 
               chair_mesh.traverse(function (child) {
                 if (child.isMesh) {
-                  child.material = shader_material; // This now works!
+                  child.material = shader_material;
                 }
               });
 
@@ -140,20 +141,31 @@
             },
           );
 
-          // --- Your original plane geometry code ---
+          // --- plane geometry code ---
           const plane_geometry = new THREE.PlaneGeometry(1, 2, 8, 8);
           const mesh = new THREE.Mesh(plane_geometry, shader_material);
           mesh.position.z = -2;
           scene.add(mesh);
 
           window.addEventListener("keydown", function (event) {
-            // Check if the key pressed is Space (' ') or maybe 'g' for glitch
+            // Check if the key pressed is Space (' ') or  'g' to toggle aberration pass
             if (event.key === " " || event.key === "g") {
               // Flip the boolean
               isGlitchActive = !isGlitchActive;
               console.log("Glitch Active:", isGlitchActive);
             }
+            // 'c' key cycles behaviour of the fragment shader
+            if (event.key === "c") {
+              // step u_behaviour
+              const behaviourValues = [3.0, 1.0, 0.0];
+              currentIndex = (currentIndex + 1) % behaviourValues.length;
+              const newValue = behaviourValues[currentIndex];
+              console.log("Behaviour:", newValue);
+              uniforms.u_behaviour.value = newValue;
+            }
           });
+
+          //const behaviourValues = [3.0, 1.0, 0.0];
 
           // --- Your original resize handler ---
           function handleResize() {
