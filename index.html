@@ -14,293 +14,200 @@
     <canvas id="shader-canvas"></canvas>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://unpkg.com/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
-    <script id="vertexShader-passthrough" type="x-shader/x-vertex">
-      // 'varying' means it passes data to the fragment shader
-      varying vec2 vUv;
-      uniform sampler2D u_texture; // <-- 1. Declare the new uniform
+    <script src="https://unpkg.com/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+    <script src="https://unpkg.com/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+    <script src="https://unpkg.com/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+    <script src="https://unpkg.com/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
 
-      void main() {
-          // 'uv' is an attribute provided by PlaneGeometry
-          vUv = uv;
-
-          // 'position' is an attribute.
-          // 'projectionMatrix' and 'modelViewMatrix' are uniforms
-          // automatically provided by three.js to position the vertex.
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-      }
-    </script>
-    <script id="vertexShader" type="x-shader/x-vertex">
-      precision mediump float;
-      // 'varying' means it passes data to the fragment shader
-      varying vec2 vUv;
-      uniform sampler2D u_texture; // <-- 1. Declare the new uniform
-      uniform float u_time;
-
-      void main() {
-          // 'uv' is an attribute provided by PlaneGeometry
-          vUv = uv;
-          vec3 displacedPosition = position;
-          // 2. Calculate displacement.
-          // We use position.x and position.y to make the wave vary across
-          // the plane, otherwise the whole plane would just move up and down.
-          // Multiplying by 5.0 increases the frequency (more waves).
-          // Multiplying by 0.2 decreases the amplitude (smaller waves).
-          float displacement =
-              sin(position.x * 5.0 + u_time) * 0.2 +
-              sin(position.y * 5.0 + u_time) * 0.2;
-
-          // 3. Apply the displacement to the z-axis
-          //displacedPosition.z = displacement; // This displacement will be invisible in orthogrpahic straight down view
-          // 3. Apply the displacement to the x-axis instead
-          displacedPosition.x = position.x + displacement;
-
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(displacedPosition, 1.0);
-      }
-    </script>
-
-    <!-- 3. The Fragment Shader (GLSL) -->
-    <!--
-      This is where the generative art happens!
-      It runs for EVERY pixel on the plane.
-    -->
-    <script id="fragmentShader" type="x-shader/x-fragment">
-        // Set default precision for floating point numbers
-        precision mediump float;
-
-        // Uniforms are variables passed from our JavaScript
-        uniform vec2 u_resolution; // The resolution of the canvas
-        uniform float u_time;       // The elapsed time for animation
-        uniform sampler2D u_texture; // <-- 1. Declare the new uniform
-
-        // 'vUv' is the data received from the vertex shader (0.0 to 1.0)
-        varying vec2 vUv;
-
-        // --- BAYER DITHERING MAP ---
-        // We define the 4x4 Bayer threshold map as a matrix.
-        // GLSL matrices are "column-major", so we list the columns.
-        const mat4 bayerMap = mat4(
-            15.0, 195.0, 60.0, 240.0,  // Column 0
-            135.0, 75.0, 180.0, 120.0, // Column 1
-            45.0, 225.0, 30.0, 210.0,  // Column 2
-            165.0, 105.0, 150.0, 90.0   // Column 3
-        );
-        // --- END DITHERING MAP ---
-
-      vec3 createColorPattern(vec2 st, float time) {
-          float r = sin(st.x * 10.0 + time * 0.5) * 0.5 + 0.5;
-          float g = sin(st.y * 10.0 + time * 0.3) * 0.5 + 0.5;
-          float b = sin(st.x * 5.0 - st.y * 5.0 + time) * 0.5 + 0.5;
-          return vec3(r, g, b);
-      }
-
-      float bayesianDither(vec3 originalColor) {
-        // 2. CALCULATE LUMINANCE (0.0 to 1.0)
-        // Convert the color to grayscale brightness
-        //originalColor = color;
-        float luminance = dot(originalColor, vec3(0.299, 0.587, 0.114));
-
-        // 3. GET DITHER THRESHOLD
-        // gl_FragCoord.xy gives us the screen pixel coordinate (e.g., 800, 600)
-        // We use mod() to find which cell in the 4x4 map this pixel corresponds to.
-        int x = int(mod(gl_FragCoord.x, 4.0));
-        int y = int(mod(gl_FragCoord.y, 4.0));
-
-        // Look up the threshold value from the map (col, row)
-        // The value is 0-255, so we divide by 255.0 to normalize it to 0.0-1.0
-        float threshold = bayerMap[x][y] / 255.0;
-
-        // 4. COMPARE AND SET FINAL COLOR
-        // If the luminance is brighter than the threshold, use 1.0 (bright).
-        // Otherwise, use 0.0 (dark).
-        float ditheredValue = luminance > threshold ? 1.0 : 0.0;
-
-        return ditheredValue;
-        //return 1.0;
-      }
-
-        void main() {
-            // 'vUv' gives us the normalized coordinate (0.0 to 1.0)
-            vec2 st = vUv;
-
-            // 1. CALCULATE ORIGINAL COLOR
-            vec3 originalColor = createColorPattern(st, u_time);
-            vec3 textureColor = texture2D(u_texture, st).rgb;
-
-            vec3 blendedColor = mix(originalColor, textureColor, 0.5);
-            // 2. Apply Bayesian dither
-            float ditheredValue = bayesianDither(blendedColor);
-            //float ditheredTextureValue = bayesianDither(textureColor);
-
-            // Blend the original color with the dithered value.
-            // This preserves the color, but applies the dither pattern
-            // (multiplying by 1.0 keeps the color, multiplying by 0.0 makes it black).
-            // with texture:
-            //vec3 finalColor = blendedColor * ditheredValue;
-
-            float ditheredValue2 = bayesianDither(originalColor);
-            vec3 finalColor = originalColor * ditheredValue2;
-
-            // Set the final composited color as periodically bw or colored
-            if ((sin(u_time/1.17)) < 0.0 ) {
-              gl_FragColor = vec4(finalColor, 1.0); //<= Colorize
-            }
-            else {
-              gl_FragColor = vec4(vec3(ditheredValue2), 1.0);
-            }; //<= Monochrome no texture
-            //gl_FragColor = vec4(vec3(ditheredValue), 1.0); //<= Monochrome w/ texture
-        }
-    </script>
-
-    <!-- 4. The JavaScript to set up three.js -->
     <script>
-      // Get the canvas element
-      const canvas = document.getElementById("shader-canvas");
+      async function main() {
+        let isGlitchActive = true; // The global boolean
 
-      // Create the three.js scene
-      const scene = new THREE.Scene();
+        try {
+          // --- Your original setup code ---
+          const canvas = document.getElementById("shader-canvas");
+          const scene = new THREE.Scene();
+          const clock = new THREE.Clock();
+          const frustumHeight = 2;
+          const aspect = canvas.clientWidth / canvas.clientHeight;
+          const frustumWidth = frustumHeight * aspect;
+          const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 1000);
+          camera.position.z = 2;
+          const renderer = new THREE.WebGLRenderer({ canvas: canvas });
 
-      // Create a clock to track elapsed time
-      const clock = new THREE.Clock();
+          // 2. Setup
+          const composer = new THREE.EffectComposer(renderer);
+          const renderPass = new THREE.RenderPass(scene, camera);
+          composer.addPass(renderPass);
 
-      // We'll use a vertical view size of 2 (from -1 to 1)
-      const frustumHeight = 2;
-      const aspect = canvas.clientWidth / canvas.clientHeight;
-      const frustumWidth = frustumHeight * aspect;
+          const uniforms = {
+            tDiffuse: { value: null },
+            u_time: { value: 0.0 },
+            u_resolution: { value: new THREE.Vector2(1, 1) },
+            u_texture: { value: null },
+          };
+          let chair_mesh;
 
-      // Create camera with placeholder bounds, handleResize() will fix it
-      const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 1000);
+          // 1. Asynchronously fetch shader files.
+          //    Promise.all waits for to finish.
+          console.log("Fetching shaders...");
+          const [vertexResponse, fragmentResponse, postResponse] =
+            await Promise.all([
+              fetch("./vertex_shader.glsl"),
+              fetch("./fragment_shader_chromatic.glsl"),
+              fetch("./fragment_post_chromatic.glsl"),
+            ]);
 
-      // *** NEW ***
-      // Position the camera so it looks at the scene
-      camera.position.z = 2;
+          // Check if the files were found
+          if (!vertexResponse.ok)
+            throw new Error(
+              `Failed to fetch vertex_shader.glsl: ${vertexResponse.statusText}`,
+            );
+          if (!fragmentResponse.ok)
+            throw new Error(
+              `Failed to fetch fragment_shader.glsl: ${fragmentResponse.statusText}`,
+            );
+          if (!postResponse.ok)
+            throw new Error(
+              `Failed to fetch fragment_post_chromatic.glsl: ${fragmentPostResponse.statusText}`,
+            );
 
-      // Create the WebGL renderer
-      const renderer = new THREE.WebGLRenderer({ canvas: canvas });
+          // 2. Get the text content from the loaded files
+          const vertexShader = await vertexResponse.text();
+          const fragmentShader = await fragmentResponse.text();
+          const postFragmentShader = await postResponse.text();
+          console.log("Shaders loaded successfully.");
 
-      const uniforms = {
-        u_time: { value: 0.0 },
-        u_resolution: { value: new THREE.Vector2(1, 1) }, // Placeholder
-        u_texture: { value: null },
-      };
+          // 2. DEFINE THE POST-PROCESSING SHADER OBJECT
+          // We need a simple vertex shader for the screen quad.
+          // We can define it right here as a string because it never changes.
+          const ChromaticAberrationShader = {
+            uniforms: {
+              tDiffuse: { value: null }, // The screen texture
+              u_time: { value: 0.0 },
+            },
+            // Standard vertex shader for post-processing (just renders a flat square)
+            vertexShader: `
+                  varying vec2 vUv;
+                  void main() {
+                      vUv = uv;
+                      gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
+                  }
+              `,
+            // The fragment shader you loaded from the file
+            fragmentShader: postFragmentShader,
+          };
 
-      // Declare the chair variable
-      let chair_mesh;
+          // we got all shaders including postprocessing one with definition, we can now add the clean Aberration Pass
+          // Add the clean Aberration Pass
+          const aberrationPass = new THREE.ShaderPass(
+            ChromaticAberrationShader,
+          );
+          composer.addPass(aberrationPass);
 
-      // Create the material, using our custom shaders and uniforms
-      const shader_material = new THREE.ShaderMaterial({
-        vertexShader: document.getElementById("vertexShader").textContent,
-        fragmentShader: document.getElementById("fragmentShader").textContent,
-        uniforms: uniforms,
-      });
+          // 3. NOW create the material, since we have the shader text loaded
+          const shader_material = new THREE.ShaderMaterial({
+            vertexShader: vertexShader, // <-- Use the loaded text
+            fragmentShader: fragmentShader, // <-- Use the loaded text
+            uniforms: uniforms,
+          });
 
-      // 1. Instantiate the loader
-      const loader = new THREE.GLTFLoader();
+          // This code can now run because 'shader_material' exists
+          const loader = new THREE.GLTFLoader();
+          loader.load(
+            "Stol.glb",
+            function (gltf) {
+              console.log("Model loaded successfully!");
+              chair_mesh = gltf.scene;
 
-      // 2. Call the .load() method
-      loader.load(
-        "Stol.glb",
-        function (gltf) {
-          // 3. (onLoad) Success callback
-          console.log("Model loaded successfully!");
+              chair_mesh.traverse(function (child) {
+                if (child.isMesh) {
+                  child.material = shader_material; // This now works!
+                }
+              });
 
-          // Assign the loaded model to our variable
-          chair_mesh = gltf.scene;
+              chair_mesh.scale.set(0.3, 0.3, 0.3);
+              scene.add(chair_mesh);
+            },
+            function (xhr) {
+              console.log((xhr.loaded / xhr.total) * 100 + "% loaded");
+            },
+            function (error) {
+              console.error(
+                "An error happened while loading the model:",
+                error,
+              );
+            },
+          );
 
-          // Apply the custom shader material to the loaded model
-          chair_mesh.traverse(function (child) {
-            if (child.isMesh) {
-              child.material = shader_material;
+          // --- Your original plane geometry code ---
+          const plane_geometry = new THREE.PlaneGeometry(1, 2, 8, 8);
+          const mesh = new THREE.Mesh(plane_geometry, shader_material);
+          mesh.position.z = -2;
+          scene.add(mesh);
+
+          window.addEventListener("keydown", function (event) {
+            // Check if the key pressed is Space (' ') or maybe 'g' for glitch
+            if (event.key === " " || event.key === "g") {
+              // Flip the boolean
+              isGlitchActive = !isGlitchActive;
+              console.log("Glitch Active:", isGlitchActive);
             }
           });
 
-          // *** MODIFIED ***
-          // Scale the chair down to fit in the 2x2 orthographic view
-          //chair_mesh.scale.set(0.5, 0.5, 0.5);
-          // Scale the chair to be much smaller
-          chair_mesh.scale.set(0.3, 0.3, 0.3);
+          // --- Your original resize handler ---
+          function handleResize() {
+            const width = canvas.clientWidth;
+            const height = canvas.clientHeight;
+            renderer.setSize(width, height, false);
 
-          // Add the loaded model to the scene
-          scene.add(chair_mesh);
-        },
-        function (xhr) {
-          // 4. (onProgress) Optional progress callback
-          console.log((xhr.loaded / xhr.total) * 100 + "% loaded");
-        },
-        function (error) {
-          // 5. (onError) Optional error callback
-          console.error("An error happened while loading the model:", error);
-        },
-      );
+            const aspect = width / height;
+            const frustumHeight = 2;
+            const frustumWidth = frustumHeight * aspect;
 
-      // Create the geometry: a simple plane that fills the screen
-      // The 2, 2 dimensions match the orthographic camera's view
-      const plane_geometry = new THREE.PlaneGeometry(1, 2, 8, 8);
+            camera.left = frustumWidth / -2;
+            camera.right = frustumWidth / 2;
+            camera.top = frustumHeight / 2;
+            camera.bottom = frustumHeight / -2;
+            camera.updateProjectionMatrix();
+          }
+          window.addEventListener("resize", handleResize);
+          handleResize();
 
-      // Create a mesh (the 3D object) from the geometry and material
-      const mesh = new THREE.Mesh(plane_geometry, shader_material);
+          // --- Your original animation loop ---
+          function animate() {
+            requestAnimationFrame(animate);
+            const time = clock.getElapsedTime();
+            uniforms.u_time.value = time;
 
-      // *** IMPORTANT ***
-      // Move the plane back so it's behind the chair
-      mesh.position.z = -2;
+            if (chair_mesh) {
+              chair_mesh.rotation.x = time / 10;
+              chair_mesh.rotation.y = time / 5;
+              chair_mesh.position.y = Math.sin(time) * 0.6;
+            }
 
-      // Add the mesh to the scene
-      scene.add(mesh);
+            // Update time
+            aberrationPass.uniforms.u_time.value = performance.now() / 1000;
 
-      // 1. Define ONE function to handle all sizing
-      function handleResize() {
-        // Get the new size from the CSS-controlled canvas
-        const width = canvas.clientWidth;
-        const height = canvas.clientHeight;
+            if (isGlitchActive) {
+              // EITHER RENDER WITH COMPOSER EFFECT PASS:
+              composer.render();
+            } else {
+              // OR WITHOUT:
+              renderer.render(scene, camera);
+            }
+          }
 
-        // Update renderer resolution, but NOT the style
-        renderer.setSize(width, height, false);
-
-        // Update shader resolution uniform -- Not sure this makes a difference, removing it for now
-        //uniforms.u_resolution.value.set(width, height);
-
-        // Update camera bounds
-        const aspect = width / height;
-        const frustumHeight = 2; // Keep vertical size consistent
-        const frustumWidth = frustumHeight * aspect;
-
-        camera.left = frustumWidth / -2;
-        camera.right = frustumWidth / 2;
-        camera.top = frustumHeight / 2;
-        camera.bottom = frustumHeight / -2;
-
-        // Tell the camera to apply the changes
-        camera.updateProjectionMatrix();
-      }
-
-      // 2. Add the listener
-      window.addEventListener("resize", handleResize);
-
-      // 3. Call it ONCE right now to set the correct initial size
-      handleResize();
-
-      // Create the animation loop
-      function animate() {
-        // Request the next frame
-        requestAnimationFrame(animate);
-        const time = clock.getElapsedTime();
-
-        // Update the 'u_time' uniform with the elapsed time
-        uniforms.u_time.value = time;
-
-        // Check if chair_mesh has been loaded before trying to animate it
-        if (chair_mesh) {
-          // apply rotations and translations
-          chair_mesh.rotation.x = time / 10;
-          chair_mesh.rotation.y = time / 5;
-          // Set position directly
-          chair_mesh.position.y = Math.sin(time) * 0.6;
+          // --- Start the animation loop ---
+          animate();
+        } catch (error) {
+          // This will catch any errors, like missing files
+          console.error("An error occurred:", error);
         }
-        // Render the scene
-        renderer.render(scene, camera);
       }
 
-      // Start the animation loop!
-      animate();
+      // --- Call the main function to start everything ---
+      main();
     </script>
   </body>
 </html>
