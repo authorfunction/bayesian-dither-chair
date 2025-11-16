@@ -4,7 +4,11 @@ uniform vec2 u_resolution;
 uniform float u_time;
 uniform sampler2D u_texture;
 uniform float u_behaviour;
-
+uniform vec3 u_baseColor;
+uniform float u_useColorBlend;
+uniform float u_applyPattern_r;
+uniform float u_applyPattern_g;
+uniform float u_applyPattern_b;
 varying vec2 vUv;
 
 // --- BAYER DITHERING MAP ---
@@ -48,19 +52,32 @@ void main() {
 
     // -- RED CHANNEL (Shifted +) --
     vec2 st_r = vec2(st.x + amount, st.y);
-    vec3 pattern_r = createColorPattern(st_r, u_time); // Generate pattern at shifted pos
+    //vec3 pattern_r = createColorPattern(st_r, u_time); // Generate pattern at shifted pos
+    vec3 pattern_r = u_baseColor;
+    if (u_applyPattern_r > 0.0) { // Checks if the value is "true"
+        pattern_r = createColorPattern(st_r, u_time);
+    }
+
     vec3 tex_r = texture2D(u_texture, st_r).rgb; // Sample texture at shifted pos
     float final_r = mix(pattern_r.r, tex_r.r, 0.1); // Mix them
 
     // -- GREEN CHANNEL (No Shift) --
     vec2 st_g = st;
-    vec3 pattern_g = createColorPattern(st_g, u_time);
+    //vec3 pattern_g = createColorPattern(st_g, u_time);
+    vec3 pattern_g = u_baseColor;
+    if (u_applyPattern_g > 0.0) { // Checks if the value is "true"
+        pattern_g = createColorPattern(st_r, u_time);
+    }
     vec3 tex_g = texture2D(u_texture, st_g).rgb;
     float final_g = mix(pattern_g.g, tex_g.g, 0.1);
 
     // -- BLUE CHANNEL (Shifted -) --
     vec2 st_b = vec2(st.x - amount, st.y);
-    vec3 pattern_b = createColorPattern(st_b, u_time);
+    //vec3 pattern_b = createColorPattern(st_b, u_time);
+    vec3 pattern_b = u_baseColor;
+    if (u_applyPattern_b > 0.0) { // Checks if the value is "true"
+        pattern_b = createColorPattern(st_b, u_time);
+    }
     vec3 tex_b = texture2D(u_texture, st_b).rgb;
     float final_b = mix(pattern_b.b, tex_b.b, 0.1);
 
@@ -77,6 +94,11 @@ void main() {
     // 5. FINAL OUTPUT
     // This applies the dither mask to the chromatic colors
     vec3 finalRender = combinedColor * ditheredValue;
+
+    // Apply base color if enabled
+    //if (u_useColor) {
+    //    finalRender *= u_baseColor;
+    //}
 
     switch (int(u_behaviour)) {
         case 0:

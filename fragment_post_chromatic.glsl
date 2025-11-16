@@ -1,6 +1,7 @@
 uniform sampler2D tDiffuse;
 uniform float u_time;
 varying vec2 vUv;
+varying float u_glitchState;
 
 void main() {
     vec2 st = vUv;
@@ -12,6 +13,9 @@ void main() {
     amount *= 1.0 + sin(u_time * 27.0) * 0.5;
     amount = pow(amount, 3.0);
     amount *= 0.008; //0.05; // Adjust this value to change the maximum shift distance
+
+    //store glitchState
+    //u_glitchState = amount;
 
     // 2. SPLIT CHANNELS
     // Sample the scene texture (tDiffuse) at slightly different coordinates

@@ -24,6 +24,8 @@
         //globals
         let isGlitchActive = true;
         let currentIndex = 0;
+        let isPaused = false;
+        let glitchPauseBypass = false;
 
         try {
           // --- setup code ---
@@ -46,6 +48,12 @@
             u_resolution: { value: new THREE.Vector2(1, 1) },
             u_texture: { value: null },
             u_behaviour: { value: 3.0 }, // 0.0, 1.0, or 3.0 sets the behaviour of the shader
+            u_baseColor: { value: new THREE.Color(0xffffff) }, // <-- ADD THIS LINE
+            u_useColorBlend: { value: 0.0 },
+            u_applyPattern_r: { value: 1.0 },
+            u_applyPattern_g: { value: 1.0 },
+            u_applyPattern_b: { value: 1.0 },
+            u_applyDisplacement: { value: 1.0 },
           };
           let chair_mesh;
 
@@ -113,33 +121,14 @@
             uniforms: uniforms,
           });
 
-          // This code can now run because 'shader_material' exists
-          const loader = new THREE.GLTFLoader();
-          loader.load(
+          chair_mesh = await loadAndAddModel(
             "Stol.glb",
-            function (gltf) {
-              console.log("Model loaded successfully!");
-              chair_mesh = gltf.scene;
-
-              chair_mesh.traverse(function (child) {
-                if (child.isMesh) {
-                  child.material = shader_material;
-                }
-              });
-
-              chair_mesh.scale.set(0.3, 0.3, 0.3);
-              scene.add(chair_mesh);
-            },
-            function (xhr) {
-              console.log((xhr.loaded / xhr.total) * 100 + "% loaded");
-            },
-            function (error) {
-              console.error(
-                "An error happened while loading the model:",
-                error,
-              );
-            },
+            shader_material,
+            chair_mesh,
+            uniforms,
           );
+          chair_mesh.scale.set(0.3, 0.3, 0.3);
+          scene.add(chair_mesh); // Add to scene
 
           // --- plane geometry code ---
           const plane_geometry = new THREE.PlaneGeometry(1, 2, 8, 8);
@@ -162,6 +151,23 @@
               const newValue = behaviourValues[currentIndex];
               console.log("Behaviour:", newValue);
               uniforms.u_behaviour.value = newValue;
+            }
+            // 'p' key toggles pause
+            if (event.key === "p") {
+              isPaused = !isPaused;
+              if (isPaused) {
+                clock.stop(); // This correctly freezes the elapsedTime
+                console.log("Paused at", clock.getElapsedTime());
+              } else {
+                clock.oldTime = (performance || Date).now(); // Resets the "last frame" time
+                clock.running = true; // Tell the clock to resume counting
+                console.log("Resuming from", clock.getElapsedTime());
+              }
+            }
+            // 'P' key toggles glitchPauseBypass
+            if (event.key === "P") {
+              glitchPauseBypass = !glitchPauseBypass;
+              console.log("glitchPauseBypass:", glitchPauseBypass);
             }
           });
 
@@ -186,6 +192,64 @@
           window.addEventListener("resize", handleResize);
           handleResize();
 
+          /*
+           * Updated function that returns a Promise
+           */
+          function loadAndAddModel(modelFile, shaderMaterial, scene, uniforms) {
+            // Return a new Promise
+            return new Promise((resolve, reject) => {
+              const loader = new THREE.GLTFLoader();
+              loader.load(
+                modelFile,
+                function (gltf) {
+                  // SUCCESS CALLBACK
+                  console.log("Model loaded successfully!");
+                  const mesh = gltf.scene; // Get the mesh from the loaded gltf
+
+                  mesh.traverse(function (child) {
+                    if (child.isMesh) {
+                      const the_material = shaderMaterial.clone();
+                      // --- Your material logic ---
+                      the_material.uniforms.u_time = uniforms.u_time;
+                      the_material.uniforms.u_resolution =
+                        uniforms.u_resolution;
+                      the_material.uniforms.u_behaviour = uniforms.u_behaviour;
+                      the_material.uniforms.tDiffuse = uniforms.tDiffuse;
+                      the_material.uniforms.u_texture = uniforms.u_texture;
+                      the_material.uniforms.u_applyDisplacement =
+                        uniforms.u_applyDisplacement;
+
+                      let colorHex = "#33ff11";
+                      the_material.uniforms.u_baseColor.value = new THREE.Color(
+                        colorHex,
+                      );
+                      the_material.uniforms.u_applyPattern_r.value = 1.0;
+                      the_material.uniforms.u_applyPattern_g.value = 1.0;
+                      the_material.uniforms.u_applyPattern_b.value = 1.0;
+                      child.material = the_material;
+                    }
+                  });
+
+                  // Resolve the promise with the loaded mesh
+                  resolve(mesh);
+                },
+                function (xhr) {
+                  // PROGRESS CALLBACK
+                  console.log((xhr.loaded / xhr.total) * 100 + "% loaded");
+                },
+                function (error) {
+                  // ERROR CALLBACK
+                  console.error(
+                    "An error happened while loading the model:",
+                    error,
+                  );
+                  // Reject the promise with the error
+                  reject(error);
+                },
+              );
+            });
+          }
+
           // --- Your original animation loop ---
           function animate() {
             requestAnimationFrame(animate);
@@ -199,7 +263,11 @@
             }
 
             // Update time
-            aberrationPass.uniforms.u_time.value = performance.now() / 1000;
+            if (glitchPauseBypass) {
+              aberrationPass.uniforms.u_time.value = performance.now() / 1000;
+            } else {
+              aberrationPass.uniforms.u_time.value = time;
+            }
 
             if (isGlitchActive) {
               // EITHER RENDER WITH COMPOSER EFFECT PASS:

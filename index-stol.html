@@ -1,0 +1,671 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>threejs-bayesian-generation</title>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Three.js Generative Shader</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+
+  <body>
+    <!-- The canvas element where the shader will be rendered -->
+    <canvas id="shader-canvas"></canvas>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://unpkg.com/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+    <script src="https://unpkg.com/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+    <script src="https://unpkg.com/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+    <script src="https://unpkg.com/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+    <script src="https://unpkg.com/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+
+    <script>
+      async function main() {
+        //globals
+        let isGlitchActive = true;
+        let currentIndex = 0;
+        let lightsOn = true;
+        let colorMode = "colored"; // Start in 'colored' mode
+        const COLOR_MODES = ["colored", "cycle", "black"];
+        let colorModeIndex = 0;
+        const blackColor = new THREE.Color(0x000000); // Create black color once
+        let isPaused = false;
+        let glitchPauseBypass = false;
+        let rotateX = false;
+        let rotateY = true;
+        let rotateZ = false;
+
+        // --- NEW CANVAS LOGGER GLOBALS ---
+        let logSprite;
+        let logCanvas, logCtx, logTexture;
+        const logMessages = []; // Will store { text, timestamp }
+        const LOG_CANVAS_WIDTH = 1024 * 2 + 512; // Was 512
+        const LOG_CANVAS_HEIGHT = 512 * 2 + 128; // Was 256
+        const LOG_FONT_SIZE = 24 * 8; // Was 20
+        const LOG_LINE_HEIGHT = 28 * 8; // Was 24
+        const LOG_PADDING = 20 * 8; // Was 10
+        const LOG_DURATION = 3.0; // seconds
+        const LOG_FADE_TIME = 0.5; // seconds
+
+        // --- setup code ---
+        const canvas = document.getElementById("shader-canvas");
+        const scene = new THREE.Scene();
+        const clock = new THREE.Clock();
+        const frustumHeight = 2;
+        const aspect = canvas.clientWidth / canvas.clientHeight;
+        const frustumWidth = frustumHeight * aspect;
+        const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 1000);
+        camera.position.z = 2;
+        const renderer = new THREE.WebGLRenderer({ canvas: canvas });
+        const composer = new THREE.EffectComposer(renderer);
+        const renderPass = new THREE.RenderPass(scene, camera);
+        composer.addPass(renderPass);
+        let chair_mesh;
+        // --- Lighting ---
+        //const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+        //scene.add(ambientLight);
+        //
+        //const directionalLight = new THREE.DirectionalLight(0xffffff, 1.5);
+        //directionalLight.position.set(5, 20, 7.5);
+        //scene.add(directionalLight);
+
+        const uniforms = {
+          tDiffuse: { value: null },
+          u_time: { value: 0.0 },
+          u_resolution: { value: new THREE.Vector2(1, 1) },
+          u_texture: { value: null },
+          u_behaviour: { value: 3.0 }, // 0.0, 1.0, or 3.0 sets the behaviour of the shader
+          u_baseColor: { value: new THREE.Color(0xffffff) }, // <-- ADD THIS LINE
+          u_useColorBlend: { value: 0.0 },
+          u_applyPattern_r: { value: 1.0 },
+          u_applyPattern_g: { value: 1.0 },
+          u_applyPattern_b: { value: 1.0 },
+          u_applyDisplacement: { value: 1.0 },
+          u_glitchState: { value: 0.0 },
+        };
+        //let chair_mesh;
+
+        // Asynchronously fetch shader files.
+        // Promise.all waits for to finish.
+        console.log("Fetching shaders...");
+        const [vertexResponse, fragmentResponse, postResponse] =
+          await Promise.all([
+            fetch("./vertex_shader.glsl"),
+            fetch("./fragment_shader_chromatic.glsl"),
+            fetch("./fragment_post_chromatic.glsl"),
+          ]);
+
+        // Check if the files were found
+        if (!vertexResponse.ok)
+          throw new Error(
+            `Failed to fetch vertex_shader.glsl: ${vertexResponse.statusText}`,
+          );
+        if (!fragmentResponse.ok)
+          throw new Error(
+            `Failed to fetch fragment_shader.glsl: ${fragmentResponse.statusText}`,
+          );
+        if (!postResponse.ok)
+          throw new Error(
+            `Failed to fetch fragment_post_chromatic.glsl: ${fragmentPostResponse.statusText}`,
+          );
+
+        // Get the text content from the loaded files
+        const vertexShader = await vertexResponse.text();
+        const fragmentShader = await fragmentResponse.text();
+        const postFragmentShader = await postResponse.text();
+        console.log("Shaders loaded successfully.");
+
+        // DEFINE THE POST-PROCESSING SHADER OBJECT
+        // We need a simple vertex shader for the screen quad.
+        // We can define it right here as a string because it never changes.
+        const ChromaticAberrationShader = {
+          uniforms: {
+            tDiffuse: { value: null }, // The screen texture
+            u_time: { value: 0.0 },
+            u_glitchState: { value: 0.0 },
+          },
+          // Standard vertex shader for post-processing (just renders a flat square)
+          vertexShader: `
+                varying vec2 vUv;
+                void main() {
+                    vUv = uv;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
+                }
+            `,
+          // The fragment shader  loaded from the file
+          fragmentShader: postFragmentShader,
+        };
+
+        // we got all shaders including postprocessing one with definition, we can now add the clean Aberration Pass
+        // Add the clean Aberration Pass
+        const aberrationPass = new THREE.ShaderPass(ChromaticAberrationShader);
+        composer.addPass(aberrationPass);
+
+        // NOW create the material, since we have the shader text loaded
+        const shader_material = new THREE.ShaderMaterial({
+          vertexShader: vertexShader, // <-- Use the loaded text
+          fragmentShader: fragmentShader, // <-- Use the loaded text
+          uniforms: uniforms,
+        });
+
+        // --- Create Voxel Grid ---
+        let voxelGroup;
+
+        // The 4x4 grid data from the image
+        // (Top-left is [0][0]); 'null' represents the white (empty) squares
+        const gridData = [
+          [null, "#4e210d", "#dcaf3b", null], // Row 0
+          ["#000000", "#a53df6", "#ea33d2", "#51b3f9"], // Row 1
+          [null, "#000000", "#c0281b", "#a53df6"], // Row 2
+          ["#000000", "#4e210d", "#55baac", null], // Row 3
+        ];
+        // Size of each voxel
+        const cubeSize = 1;
+        // Total grid dimensions
+        const gridWidth = 4;
+        const gridHeight = 4;
+        const segments = 1;
+
+        // Create the voxel grid
+        voxelGroup = createVoxelGrid(
+          gridData,
+          shader_material,
+          cubeSize,
+          gridWidth,
+          gridHeight,
+          segments,
+        );
+
+        /*voxelGroup.scale.set(0.3, 0.3, 0.3);
+        scene.add(voxelGroup);*/
+
+        // --- load chair model ---
+        chair_mesh = await loadAndAddModel(
+          "Stol.glb",
+          shader_material,
+          chair_mesh,
+          uniforms,
+        );
+        chair_mesh.scale.set(0.3, 0.3, 0.3);
+        scene.add(chair_mesh); // Add to scene
+
+        // --- plane geometry code ---
+        const plane_geometry = new THREE.PlaneGeometry(1, 2, 8, 8);
+        const mesh = new THREE.Mesh(plane_geometry, shader_material);
+        mesh.position.z = -2;
+        scene.add(mesh);
+
+        // --- 3. ADD HELPER FUNCTIONS ---
+        function setAllVoxelColors(color) {
+          voxelGroup.traverse(function (child) {
+            if (child.isMesh && child.material.uniforms.u_baseColor) {
+              child.material.uniforms.u_baseColor.value.set(color);
+            }
+          });
+        }
+
+        function restoreAllVoxelColors() {
+          voxelGroup.traverse(function (child) {
+            if (child.isMesh && child.userData.originalColor) {
+              child.material.uniforms.u_baseColor.value.set(
+                child.userData.originalColor,
+              );
+            }
+          });
+        }
+
+        // --- New Log Function (Canvas Version) ---
+        function logToScreen(message) {
+          // Add message to the queue. 'animate' loop will handle drawing.
+          logMessages.push({
+            text: message,
+            timestamp: clock.getElapsedTime(),
+          });
+        }
+
+        function createVoxelGrid(
+          voxelData,
+          shaderMaterial,
+          cubeSize,
+          gridWidth,
+          gridHeight,
+          segments,
+        ) {
+          // Size of each voxel
+          // const cubeSize = 1;
+          // Total grid dimensions
+          // const gridWidth = 4;
+          // const gridHeight = 4;
+          voxelGroup = new THREE.Group();
+          segments = segments || 1;
+          const geometry = new THREE.BoxGeometry(
+            cubeSize,
+            cubeSize,
+            cubeSize,
+            segments,
+            segments,
+            segments,
+          );
+
+          // Center offset
+          // (gridWidth / 2) - (cubeSize / 2)
+          const offsetX = gridWidth / 2 - cubeSize / 2;
+          // (gridHeight / 2) - (cubeSize / 2)
+          const offsetY = gridHeight / 2 - cubeSize / 2;
+
+          for (let y = 0; y < gridHeight; y++) {
+            for (let x = 0; x < gridWidth; x++) {
+              const colorHex = gridData[y][x];
+              // If the color is not null (not white), create a cube
+              if (colorHex) {
+                const the_material = shaderMaterial.clone();
+                // --- THE FIX: ---
+                // Re-link all shared uniforms to the master 'uniforms' object
+                // so they receive updates from the animate loop.
+                the_material.uniforms.u_time = uniforms.u_time;
+                the_material.uniforms.u_resolution = uniforms.u_resolution;
+                the_material.uniforms.u_behaviour = uniforms.u_behaviour;
+                the_material.uniforms.tDiffuse = uniforms.tDiffuse;
+                the_material.uniforms.u_texture = uniforms.u_texture;
+                //the_material.uniforms.u_displacement = uniforms.u_displacement;
+
+                // Now, set the uniforms you want to be unique.
+                //colorHex = "#33ff11";
+                the_material.uniforms.u_baseColor.value = new THREE.Color(
+                  colorHex,
+                );
+                //the_material.uniforms.u_useColor.value = 1.0;
+                the_material.uniforms.u_applyDisplacement.value = 0.0;
+                the_material.uniforms.u_applyPattern_r.value = 0.0;
+                the_material.uniforms.u_applyPattern_g.value = 0.0;
+                the_material.uniforms.u_applyPattern_b.value = 0.0;
+                material = the_material;
+
+                const cube = new THREE.Mesh(geometry, material);
+                // Store a clone of the original color for restoration
+                cube.userData.originalColor =
+                  the_material.uniforms.u_baseColor.value.clone();
+
+                // Position the cube
+                // We subtract offsetX/offsetY to center the grid at (0,0)
+                // We flip 'y' (gridHeight - 1 - y) so that y=0 is the top row
+                cube.position.x = x * cubeSize - offsetX;
+                cube.position.y = (gridHeight - 1 - y) * cubeSize - offsetY;
+                cube.position.z = 0; // All at z=0 for a flat panel
+
+                // Add black edges for a crisp "voxel" look
+                const edges = new THREE.EdgesGeometry(geometry);
+                const lineMaterial = new THREE.LineBasicMaterial({
+                  color: 0x000000,
+                  linewidth: 2,
+                });
+                const wireframe = new THREE.LineSegments(edges, lineMaterial);
+
+                //cube.add(wireframe);
+                voxelGroup.add(cube);
+              }
+            }
+          }
+          return voxelGroup;
+        }
+
+        function loadAndAddModel(modelFile, shaderMaterial, scene, uniforms) {
+          // Return a new Promise
+          return new Promise((resolve, reject) => {
+            const loader = new THREE.GLTFLoader();
+            loader.load(
+              modelFile,
+              function (gltf) {
+                // SUCCESS CALLBACK
+                console.log("Model loaded successfully!");
+                const mesh = gltf.scene; // Get the mesh from the loaded gltf
+
+                mesh.traverse(function (child) {
+                  if (child.isMesh) {
+                    const the_material = shaderMaterial.clone();
+                    // --- Your material logic ---
+                    the_material.uniforms.u_time = uniforms.u_time;
+                    the_material.uniforms.u_resolution = uniforms.u_resolution;
+                    the_material.uniforms.u_behaviour = uniforms.u_behaviour;
+                    the_material.uniforms.tDiffuse = uniforms.tDiffuse;
+                    the_material.uniforms.u_texture = uniforms.u_texture;
+                    the_material.uniforms.u_applyDisplacement =
+                      uniforms.u_applyDisplacement;
+
+                    let colorHex = "#33ff11";
+                    the_material.uniforms.u_baseColor.value = new THREE.Color(
+                      colorHex,
+                    );
+                    the_material.uniforms.u_applyPattern_r.value = 1.0;
+                    the_material.uniforms.u_applyPattern_g.value = 1.0;
+                    the_material.uniforms.u_applyPattern_b.value = 1.0;
+                    child.material = the_material;
+                  }
+                });
+
+                // Resolve the promise with the loaded mesh
+                resolve(mesh);
+              },
+              function (xhr) {
+                // PROGRESS CALLBACK
+                console.log((xhr.loaded / xhr.total) * 100 + "% loaded");
+              },
+              function (error) {
+                // ERROR CALLBACK
+                console.error(
+                  "An error happened while loading the model:",
+                  error,
+                );
+                // Reject the promise with the error
+                reject(error);
+              },
+            );
+          });
+        }
+
+        window.addEventListener("keydown", function (event) {
+          // Check if the key pressed is Space (' ') or  'g' to toggle aberration pass
+          if (event.key === " " || event.key === "g") {
+            // Flip the boolean
+            isGlitchActive = !isGlitchActive;
+            console.log("Glitch Active:", isGlitchActive);
+            logToScreen("Glitch Active:" + isGlitchActive);
+          }
+          // 'c' key cycles behaviour of the fragment shader
+          if (event.key === "c") {
+            // step u_behaviour
+            const behaviourValues = [3.0, 1.0, 0.0];
+            currentIndex = (currentIndex + 1) % behaviourValues.length;
+            const newValue = behaviourValues[currentIndex];
+            console.log("Behaviour:", newValue);
+            logToScreen("Behaviour:" + newValue);
+            uniforms.u_behaviour.value = newValue;
+          }
+          // 'b' key cycles color mode
+          if (event.key === "b") {
+            colorModeIndex = (colorModeIndex + 1) % COLOR_MODES.length;
+            colorMode = COLOR_MODES[colorModeIndex];
+            console.log("Color Mode:", colorMode);
+            logToScreen("Color Mode:" + colorMode);
+          }
+          // 'p' key toggles pause
+          if (event.key === "p") {
+            isPaused = !isPaused;
+            if (isPaused) {
+              clock.stop(); // This correctly freezes the elapsedTime
+              console.log("Paused at", clock.getElapsedTime());
+              //logToScreen("Paused");
+            } else {
+              clock.oldTime = (performance || Date).now(); // Resets the "last frame" time
+              clock.running = true; // Tell the clock to resume counting
+              console.log("Resuming from", clock.getElapsedTime());
+              //logToScreen("Unpaused");
+            }
+          }
+          // 'P' key toggles glitchPauseBypass
+          if (event.key === "P") {
+            glitchPauseBypass = !glitchPauseBypass;
+            console.log("glitchPauseBypass:", glitchPauseBypass);
+          }
+          if (event.key === "z") {
+            rotateZ = !rotateZ;
+            console.log("rotateZ:", rotateZ);
+          }
+          if (event.key === "x") {
+            rotateX = !rotateX;
+            console.log("rotateX:", rotateX);
+          }
+          if (event.key === "y") {
+            rotateY = !rotateY;
+            console.log("rotateY:", rotateY);
+          }
+          if (event.key === "1") {
+            if (shader_material.uniforms.u_applyPattern_r.value === 0.0) {
+              shader_material.uniforms.u_applyPattern_r.value = 1.0;
+            } else {
+              shader_material.uniforms.u_applyPattern_r.value = 0.0;
+            }
+            logToScreen(
+              "u_applyPattern_r:" +
+                shader_material.uniforms.u_applyPattern_r.value,
+            );
+          }
+          if (event.key === "2") {
+            if (shader_material.uniforms.u_applyPattern_g.value === 0.0) {
+              shader_material.uniforms.u_applyPattern_g.value = 1.0;
+            } else {
+              shader_material.uniforms.u_applyPattern_g.value = 0.0;
+            }
+            logToScreen(
+              "u_applyPattern_g:" +
+                shader_material.uniforms.u_applyPattern_g.value,
+            );
+          }
+          if (event.key === "3") {
+            if (shader_material.uniforms.u_applyPattern_b.value === 0.0) {
+              shader_material.uniforms.u_applyPattern_b.value = 1.0;
+            } else {
+              shader_material.uniforms.u_applyPattern_b.value = 0.0;
+            }
+            logToScreen(
+              "u_applyPattern_b:" +
+                shader_material.uniforms.u_applyPattern_b.value,
+            );
+          }
+          if (event.key === "r") {
+            //randomize parameters
+            shader_material.uniforms.u_applyPattern_r.value =
+              Math.random() > 0.5 ? 1.0 : 0.0;
+            shader_material.uniforms.u_applyPattern_g.value =
+              Math.random() > 0.5 ? 1.0 : 0.0;
+            shader_material.uniforms.u_applyPattern_b.value =
+              Math.random() > 0.5 ? 1.0 : 0.0;
+            logToScreen(
+              "u_applyPattern_r:" +
+                shader_material.uniforms.u_applyPattern_r.value,
+            );
+            logToScreen(
+              "u_applyPattern_g:" +
+                shader_material.uniforms.u_applyPattern_g.value,
+            );
+            logToScreen(
+              "u_applyPattern_b:" +
+                shader_material.uniforms.u_applyPattern_b.value,
+            );
+          }
+        });
+
+        //const behaviourValues = [3.0, 1.0, 0.0];
+
+        // --- Your original resize handler ---
+        function handleResize() {
+          const width = canvas.clientWidth;
+          const height = canvas.clientHeight;
+          renderer.setSize(width, height, false);
+
+          const aspect = width / height;
+          const frustumHeight = 2;
+          const frustumWidth = frustumHeight * aspect;
+
+          camera.left = frustumWidth / -2;
+          camera.right = frustumWidth / 2;
+          camera.top = frustumHeight / 2;
+          camera.bottom = frustumHeight / -2;
+          camera.updateProjectionMatrix();
+
+          // --- CREATE/UPDATE LOG SPRITE ---
+          // Update shader resolution uniform
+          uniforms.u_resolution.value.set(width, height);
+
+          if (!logSprite) {
+            // 1. Create the 2D canvas
+            logCanvas = document.createElement("canvas");
+            logCanvas.width = LOG_CANVAS_WIDTH;
+            logCanvas.height = LOG_CANVAS_HEIGHT;
+            logCtx = logCanvas.getContext("2d");
+
+            // 2. Create the texture and material
+            logTexture = new THREE.CanvasTexture(logCanvas);
+            // --- ADDED FILTERING ---
+            logTexture.minFilter = THREE.NearestFilter;
+            logTexture.magFilter = THREE.NearestFilter;
+            const logMaterial = new THREE.SpriteMaterial({
+              map: logTexture,
+              transparent: true,
+            });
+
+            // 3. Create the sprite and add to scene
+            logSprite = new THREE.Sprite(logMaterial);
+            scene.add(logSprite);
+          }
+
+          // 4. Position and scale the sprite
+          // We'll make it half the width of the screen
+          const spriteWidth = frustumWidth / 2;
+          // Calculate height based on canvas aspect ratio
+          const spriteHeight =
+            spriteWidth * (LOG_CANVAS_HEIGHT / LOG_CANVAS_WIDTH);
+          logSprite.scale.set(spriteWidth, spriteHeight, 1);
+
+          // Position in bottom-left corner (position is sprite's center)
+          const padding = 0.1; // World-space padding
+          logSprite.position.set(
+            camera.left + spriteWidth / 2 + padding,
+            camera.bottom + spriteHeight / 2 + padding,
+            1.9, // In front of everything
+          );
+        }
+        window.addEventListener("resize", handleResize);
+        handleResize();
+
+        // --- Your original animation loop ---
+        function animate() {
+          requestAnimationFrame(animate);
+          const time = clock.getElapsedTime();
+          uniforms.u_time.value = time;
+
+          // --- UPDATE ON-CANVAS LOG ---
+          if (logCtx) {
+            // 1. Filter expired messages
+            // We do this by creating a new array, which is efficient
+            const activeMessages = [];
+            let needsRedraw = false;
+
+            for (const msg of logMessages) {
+              if (time - msg.timestamp < LOG_DURATION) {
+                activeMessages.push(msg);
+              } else {
+                needsRedraw = true; // A message expired, need to clear it
+              }
+            }
+
+            if (logMessages.length !== activeMessages.length) {
+              logMessages.length = 0; // Clear original array
+              logMessages.push(...activeMessages); // Push active ones back
+              needsRedraw = true;
+            }
+
+            // Also redraw if there are messages (for fade animation)
+            if (logMessages.length > 0) {
+              needsRedraw = true;
+            }
+
+            if (needsRedraw) {
+              // 2. Clear canvas
+              logCtx.clearRect(0, 0, LOG_CANVAS_WIDTH, LOG_CANVAS_HEIGHT);
+              logCtx.font = `${LOG_FONT_SIZE}px monospace`;
+
+              // 3. Draw active messages
+              // Find how many messages fit
+              const maxMessages = Math.floor(
+                (LOG_CANVAS_HEIGHT - LOG_PADDING * 2) / LOG_LINE_HEIGHT,
+              );
+              const startIndex = Math.max(0, logMessages.length - maxMessages);
+
+              for (let i = startIndex; i < logMessages.length; i++) {
+                const msg = logMessages[i];
+                const age = time - msg.timestamp;
+
+                // Calculate opacity
+                let opacity = 1.0;
+                if (age > LOG_DURATION - LOG_FADE_TIME) {
+                  opacity = (LOG_DURATION - age) / LOG_FADE_TIME;
+                }
+
+                logCtx.fillStyle = `rgba(255, 255, 255, ${opacity * 0.9})`;
+
+                // Calculate Y position (0,0 is top-left)
+                // We draw from the bottom-up
+                const relativeIndex = i - startIndex;
+                const y =
+                  LOG_CANVAS_HEIGHT -
+                  LOG_PADDING -
+                  relativeIndex * LOG_LINE_HEIGHT;
+
+                logCtx.fillText(msg.text, LOG_PADDING, y);
+              }
+
+              // 4. Tell texture to update
+              logTexture.needsUpdate = true;
+            }
+          }
+
+          // --- Color Mode Logic ---
+          switch (colorMode) {
+            case "colored":
+              restoreAllVoxelColors();
+              break;
+            case "black":
+              setAllVoxelColors(blackColor);
+              break;
+            case "cycle":
+              const cycleTime = time % 4.0;
+              if (cycleTime < 1.0) {
+                setAllVoxelColors(blackColor);
+              } else {
+                restoreAllVoxelColors();
+              }
+              break;
+          }
+
+          if (voxelGroup) {
+            //voxelGroup.rotation.x = time / 10;
+            if (rotateY) voxelGroup.rotation.y = time / -5;
+            if (rotateX) voxelGroup.rotation.x = time / -5;
+            if (rotateZ) voxelGroup.rotation.z = time / -5;
+
+            voxelGroup.position.y = Math.sin(time) * 0.6;
+          }
+          //animate chair_mesh
+          if (chair_mesh) {
+            chair_mesh.rotation.x = time / 10;
+            chair_mesh.rotation.y = time / 5;
+            chair_mesh.position.y = Math.sin(time) * 0.6;
+          }
+
+          // Update time
+          if (glitchPauseBypass) {
+            aberrationPass.uniforms.u_time.value = performance.now() / 1000;
+          } else {
+            aberrationPass.uniforms.u_time.value = time;
+          }
+          //console.log(aberrationPass.uniforms.u_glitchState.value);
+
+          if (isGlitchActive) {
+            // EITHER RENDER WITH COMPOSER EFFECT PASS:
+            composer.render();
+          } else {
+            // OR WITHOUT:
+            renderer.render(scene, camera);
+          }
+        }
+
+        // --- Start the animation loop ---
+        animate();
+      }
+
+      // --- Call the main function to start everything ---
+      main();
+    </script>
+  </body>
+</html>

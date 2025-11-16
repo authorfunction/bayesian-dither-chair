@@ -5,6 +5,9 @@ precision mediump float;
 uniform vec2 u_resolution; // The resolution of the canvas
 uniform float u_time; // The elapsed time for animation
 uniform sampler2D u_texture; // <-- 1. Declare the new uniform
+uniform vec3 u_baseColor;
+bool u_useColor;
+bool u_applyPattern;
 
 // 'vUv' is the data received from the vertex shader (0.0 to 1.0)
 varying vec2 vUv;
@@ -71,7 +74,11 @@ void main() {
     vec2 st = vUv;
 
     // 1. CALCULATE ORIGINAL COLOR
-    vec3 originalColor = createColorPattern(st, u_time);
+    if (u_applyPattern) {
+        vec3 originalColor = createColorPattern(st, u_time);
+    } else {
+        vec3 originalColor = u_baseColor;
+    }
     vec3 textureColor = texture2D(u_texture, st).rgb;
 
     vec3 blendedColor = mix(originalColor, textureColor, 0.5);
@@ -96,5 +103,8 @@ void main() {
         gl_FragColor = vec4(vec3(ditheredValue2), 1.0);
     }
     ; //<= Monochrome no texture
-    //gl_FragColor = vec4(vec3(ditheredValue), 1.0); //<= Monochrome w/ texture
+    //optionally blend with basecolor value
+    if (u_useColor) {
+        gl_FragColor = vec4(finalColor * u_baseColor, finalColor.a);
+    }
 }
