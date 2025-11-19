@@ -6,8 +6,9 @@ uniform vec2 u_resolution; // The resolution of the canvas
 uniform float u_time; // The elapsed time for animation
 uniform sampler2D u_texture; // <-- 1. Declare the new uniform
 uniform vec3 u_baseColor;
-bool u_useColor;
-bool u_applyPattern;
+uniform float u_useColorBlend;
+uniform float u_applyPattern;
+uniform float u_behaviour;
 
 // 'vUv' is the data received from the vertex shader (0.0 to 1.0)
 varying vec2 vUv;
@@ -72,10 +73,11 @@ float bayesianDither(vec3 originalColor) {
 void main() {
     // 'vUv' gives us the normalized coordinate (0.0 to 1.0)
     vec2 st = vUv;
+    vec3 originalColor;
 
     // 1. CALCULATE ORIGINAL COLOR
-    if (u_applyPattern) {
-        vec3 originalColor = createColorPattern(st, u_time);
+    if (u_applyPattern > 0.0) {
+        originalColor = createColorPattern(st, u_time);
     } else {
         vec3 originalColor = u_baseColor;
     }
@@ -93,18 +95,33 @@ void main() {
     //vec3 finalColor = blendedColor * ditheredValue;
 
     float ditheredValue2 = bayesianDither(originalColor);
-    vec3 finalColor = originalColor * ditheredValue2;
+    vec3 finalRender = originalColor * ditheredValue2;
 
-    // Set the final composited color as periodically bw or colored
-    if ((sin(u_time / 1.17)) < 0.0) {
-        gl_FragColor = vec4(finalColor, 1.0); //<= Colorize
+    switch (int(u_behaviour)) {
+        case 0:
+        // Show Colorized version (with aberration)
+        gl_FragColor = vec4(finalRender, 1.0);
+        break;
+        case 1:
+        // Show Monochrome version
+        gl_FragColor = vec4(vec3(ditheredValue), 1.0);
+        break;
+        default:
+        // Default behavior flip periodically
+        if ((sin(u_time / 1.17)) < 0.0) {
+            // Show Colorized version (with aberration)
+            gl_FragColor = vec4(finalRender, 1.0);
+        }
+        else {
+            // Show Monochrome version
+            gl_FragColor = vec4(vec3(ditheredValue), 1.0);
+            break;
+        }
     }
-    else {
-        gl_FragColor = vec4(vec3(ditheredValue2), 1.0);
-    }
-    ; //<= Monochrome no texture
-    //optionally blend with basecolor value
-    if (u_useColor) {
-        gl_FragColor = vec4(finalColor * u_baseColor, finalColor.a);
+    if (u_useColorBlend > 0.0) {
+        //gl_FragColor = vec4(finalColor * u_baseColor, finalColor.a);
+        // FIX 2: A vec3 (finalColor) has no .a component. Use 1.0 for alpha.
+        //gl_FragColor = vec4(finalRender * u_baseColor, 1.0);
+        gl_FragColor = vec4(mix(finalRender, u_baseColor, 0.5), 1.0);
     }
 }
