@@ -10,6 +10,8 @@ uniform float u_useColorBlend;
 uniform float u_applyPattern;
 uniform float u_behaviour;
 
+uniform float u_cycleDuration;
+
 // 'vUv' is the data received from the vertex shader (0.0 to 1.0)
 varying vec2 vUv;
 
@@ -73,13 +75,13 @@ float bayesianDither(vec3 originalColor) {
 void main() {
     // 'vUv' gives us the normalized coordinate (0.0 to 1.0)
     vec2 st = vUv;
-    vec3 originalColor;
+    vec3 originalColor; // Declare once
 
     // 1. CALCULATE ORIGINAL COLOR
     if (u_applyPattern > 0.0) {
         originalColor = createColorPattern(st, u_time);
     } else {
-        vec3 originalColor = u_baseColor;
+        originalColor = u_baseColor;
     }
     vec3 textureColor = texture2D(u_texture, st).rgb;
 
@@ -95,26 +97,31 @@ void main() {
     //vec3 finalColor = blendedColor * ditheredValue;
 
     float ditheredValue2 = bayesianDither(originalColor);
-    vec3 finalRender = originalColor * ditheredValue2;
+    vec3 finalColor = originalColor * ditheredValue2; // Renamed from finalRender
 
+    // Set the final composited color as periodically bw or colored
     switch (int(u_behaviour)) {
         case 0:
         // Show Colorized version (with aberration)
-        gl_FragColor = vec4(finalRender, 1.0);
+        gl_FragColor = vec4(finalColor, 1.0);
         break;
         case 1:
         // Show Monochrome version
-        gl_FragColor = vec4(vec3(ditheredValue), 1.0);
+        gl_FragColor = vec4(vec3(ditheredValue2), 1.0);
         break;
         default:
         // Default behavior flip periodically
-        if ((sin(u_time / 1.17)) < 0.0) {
+        // Use u_cycleDuration to control the period.
+        // We want it to be ON for u_cycleDuration and OFF for u_cycleDuration.
+        // sin(t * PI / duration) has a period of 2*duration.
+        // When sin > 0 (duration), it's one state. When < 0 (duration), it's the other.
+        if (sin(u_time * 3.14159 / u_cycleDuration) > 0.0) {
             // Show Colorized version (with aberration)
-            gl_FragColor = vec4(finalRender, 1.0);
+            gl_FragColor = vec4(finalColor, 1.0);
         }
         else {
             // Show Monochrome version
-            gl_FragColor = vec4(vec3(ditheredValue), 1.0);
+            gl_FragColor = vec4(vec3(ditheredValue2), 1.0);
             break;
         }
     }

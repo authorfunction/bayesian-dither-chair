@@ -37,6 +37,9 @@
       let rotateY = true;
       let rotateZ = false;
       let animateVoxels = true;
+      let periodicalRandomise = true;
+      let lastRandomiseInterval = 0;
+      const CYCLE_DURATION = 4.0;
 
       // --- NEW CANVAS LOGGER GLOBALS ---
       let logSprite;
@@ -78,6 +81,7 @@
         u_resolution: { value: new THREE.Vector2(1, 1) },
         u_texture: { value: null },
         u_behaviour: { value: 3.0 }, // 0.0, 1.0, or 3.0 sets the behaviour of the shader
+        u_cycleDuration: { value: 4.0 },
         u_baseColor: { value: new THREE.Color(0xffffff) }, // <-- ADD THIS LINE
         u_useColorBlend: { value: 0.0 },
         u_applyPattern_r: { value: 1.0 },
@@ -269,6 +273,7 @@
               the_material.uniforms.u_time = uniforms.u_time;
               the_material.uniforms.u_resolution = uniforms.u_resolution;
               the_material.uniforms.u_behaviour = uniforms.u_behaviour;
+              the_material.uniforms.u_cycleDuration = uniforms.u_cycleDuration;
               the_material.uniforms.tDiffuse = uniforms.tDiffuse;
               the_material.uniforms.u_texture = uniforms.u_texture;
               //the_material.uniforms.u_displacement = uniforms.u_displacement;
@@ -331,6 +336,7 @@
                   the_material.uniforms.u_time = uniforms.u_time;
                   the_material.uniforms.u_resolution = uniforms.u_resolution;
                   the_material.uniforms.u_behaviour = uniforms.u_behaviour;
+                  the_material.uniforms.u_cycleDuration = uniforms.u_cycleDuration;
                   the_material.uniforms.tDiffuse = uniforms.tDiffuse;
                   the_material.uniforms.u_texture = uniforms.u_texture;
                   the_material.uniforms.u_applyDisplacement =
@@ -484,6 +490,10 @@
         if (event.key === "v") {
           animateVoxels = !animateVoxels;
           logToScreen("animateVoxels:" + animateVoxels);
+        }
+        if (event.key === "a") {
+          periodicalRandomise = !periodicalRandomise;
+          logToScreen("periodicalRandomise:" + periodicalRandomise);
         }
       });
 
@@ -641,11 +651,18 @@
             setAllVoxelColors(whiteColor);
             break;
           case "cycle":
-            const cycleTime = time % 4.0;
-            if (cycleTime < 1.0) {
-              setAllVoxelColors(blackColor);
-            } else {
+            // Cycle through modes without changing the global 'colorMode' variable
+            const modesToCycle = ["colored", "black", "white"];
+            const modeIndex =
+              Math.floor(time / CYCLE_DURATION) % modesToCycle.length;
+            const currentCycleMode = modesToCycle[modeIndex];
+
+            if (currentCycleMode === "colored") {
               restoreAllVoxelColors();
+            } else if (currentCycleMode === "black") {
+              setAllVoxelColors(blackColor);
+            } else if (currentCycleMode === "white") {
+              setAllVoxelColors(whiteColor);
             }
             break;
         }
@@ -659,35 +676,54 @@
           voxelGroup.position.y = Math.sin(time) * 0.6;
         }
         // animate voxelGroup by displacing slightly on axis
-        if (animateVoxels) {
+        // animate voxelGroup by displacing slightly on axis
+        if (voxelGroup) {
           voxelGroup.traverse(function (child) {
             if (child.isMesh && child.material.uniforms.u_baseColor) {
-              // 1. Create an offset based on the child's grid position
-              // This creates a nice diagonal wave.
-              // Adjust the 0.2 factor to change the wave's frequency.
-              const offset = (child.position.x + child.position.y) * 0.4;
+              if (animateVoxels) {
+                // 1. Create an offset based on the child's grid position
+                // This creates a nice diagonal wave.
+                // Adjust the 0.2 factor to change the wave's frequency.
+                const offset = (child.position.x + child.position.y) * 0.4;
 
-              // You could also base it on just one axis:
-              // const offset = child.position.x * 0.2;
+                // You could also base it on just one axis:
+                // const offset = child.position.x * 0.2;
 
-              // 2. Animate the CHILD's position
-              child.position.z = Math.sin(time + offset) * 0.6;
-            }
-          });
-        } else {
-          // Reset positions when animation is off
-          voxelGroup.traverse(function (child) {
-            if (child.isMesh && child.material.uniforms.u_baseColor) {
-              child.position.z = 0;
+                // 2. Animate the CHILD's position
+                child.position.z = Math.sin(time + offset) * 0.6;
+              } else {
+                child.position.z = 0;
+              }
             }
           });
         }
+
+        // if periodical randomise is true, randomise parameters every n seconds
+        if (periodicalRandomise) {
+          let n = CYCLE_DURATION * 2.0;
+          let currentInterval = Math.floor(time / n);
+          if (currentInterval > lastRandomiseInterval) {
+            lastRandomiseInterval = currentInterval;
+            //randomize parameters
+            shader_material.uniforms.u_applyPattern_r.value =
+              Math.random() > 0.5 ? 1.0 : 0.0;
+            shader_material.uniforms.u_applyPattern_g.value =
+              Math.random() > 0.5 ? 1.0 : 0.0;
+            shader_material.uniforms.u_applyPattern_b.value =
+              Math.random() > 0.5 ? 1.0 : 0.0;
+            //randomise color mode
+            //colorModeIndex = Math.floor(Math.random() * COLOR_MODES.length);
+            //colorMode = COLOR_MODES[colorModeIndex];
+            //console.log("Periodical randomisation");
+          }
+        }
+
         //animate chair_mesh
-        if (chair_mesh) {
-          chair_mesh.rotation.x = time / 10;
-          chair_mesh.rotation.y = time / 5;
-          chair_mesh.position.y = Math.sin(time) * 0.6;
-        }
+        //if (chair_mesh) {
+        //  chair_mesh.rotation.x = time / 10;
+        //  chair_mesh.rotation.y = time / 5;
+        //  chair_mesh.position.y = Math.sin(time) * 0.6;
+        //}
 
         // Update time
         if (glitchPauseBypass) {
