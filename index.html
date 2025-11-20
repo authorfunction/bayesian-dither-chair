@@ -38,7 +38,9 @@
       let rotateZ = false;
       let animateVoxels = true;
       let periodicalRandomise = true;
+      let periodicalGlitch = true;
       let lastRandomiseInterval = 0;
+      let shaderBehaviourMode = 3.0; // 0=Color, 1=Mono, 3=Auto
       const CYCLE_DURATION = 4.0;
 
       // --- NEW CANVAS LOGGER GLOBALS ---
@@ -383,13 +385,12 @@
         }
         // 'b' key cycles behaviour of the fragment shader
         if (event.key === "b") {
-          // step u_behaviour
+          // step shaderBehaviourMode
           const behaviourValues = [3.0, 1.0, 0.0];
           currentIndex = (currentIndex + 1) % behaviourValues.length;
-          const newValue = behaviourValues[currentIndex];
-          console.log("Behaviour:", newValue);
-          logToScreen("Behaviour:" + newValue);
-          uniforms.u_behaviour.value = newValue;
+          shaderBehaviourMode = behaviourValues[currentIndex];
+          console.log("Behaviour Mode:", shaderBehaviourMode);
+          logToScreen("Behaviour Mode:" + shaderBehaviourMode);
         }
         // 'c' key cycles color mode
         if (event.key === "c") {
@@ -665,7 +666,39 @@
               setAllVoxelColors(whiteColor);
             }
             break;
+            break;
         }
+
+        // --- Shader Behaviour Logic (Sync) ---
+        let targetBehaviour = 0.0; // Default to Color
+
+        if (colorMode === "cycle") {
+          // In cycle mode, force sync with voxel state
+          // We know the cycle is: Colored -> Black -> Colored -> White
+          // 4 steps.
+          const modesToCycle = ["colored", "black", "colored", "white"];
+          const modeIndex =
+            Math.floor(time / CYCLE_DURATION) % modesToCycle.length;
+          const currentCycleMode = modesToCycle[modeIndex];
+
+          if (currentCycleMode === "colored") {
+            targetBehaviour = 0.0; // Color
+          } else {
+            targetBehaviour = 1.0; // Monochrome (for Black/White)
+          }
+        } else if (shaderBehaviourMode === 3.0) {
+          // Auto mode (Time based)
+          // Use the same 2-step rhythm as before (4s ON, 4s OFF)
+          if (Math.floor(time / CYCLE_DURATION) % 2 === 0) {
+            targetBehaviour = 0.0;
+          } else {
+            targetBehaviour = 1.0;
+          }
+        } else {
+          // Manual override (0.0 or 1.0)
+          targetBehaviour = shaderBehaviourMode;
+        }
+        uniforms.u_behaviour.value = targetBehaviour;
 
         if (voxelGroup) {
           //voxelGroup.rotation.x = time / 10;

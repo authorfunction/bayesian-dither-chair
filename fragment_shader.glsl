@@ -100,30 +100,13 @@ void main() {
     vec3 finalColor = originalColor * ditheredValue2; // Renamed from finalRender
 
     // Set the final composited color as periodically bw or colored
-    switch (int(u_behaviour)) {
-        case 0:
-        // Show Colorized version (with aberration)
+    // The flipping logic is now handled in JS via u_behaviour
+    if (u_behaviour < 0.5) {
+        // Case 0: Colorized
         gl_FragColor = vec4(finalColor, 1.0);
-        break;
-        case 1:
-        // Show Monochrome version
+    } else {
+        // Case 1: Monochrome
         gl_FragColor = vec4(vec3(ditheredValue2), 1.0);
-        break;
-        default:
-        // Default behavior flip periodically
-        // Use u_cycleDuration to control the period.
-        // We want it to be ON for u_cycleDuration and OFF for u_cycleDuration.
-        // sin(t * PI / duration) has a period of 2*duration.
-        // When sin > 0 (duration), it's one state. When < 0 (duration), it's the other.
-        if (sin(u_time * 3.14159 / u_cycleDuration) > 0.0) {
-            // Show Colorized version (with aberration)
-            gl_FragColor = vec4(finalColor, 1.0);
-        }
-        else {
-            // Show Monochrome version
-            gl_FragColor = vec4(vec3(ditheredValue2), 1.0);
-            break;
-        }
     }
     if (u_useColorBlend > 0.0) {
         //gl_FragColor = vec4(finalColor * u_baseColor, finalColor.a);
